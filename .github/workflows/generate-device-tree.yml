@@ -1,8 +1,6 @@
 name: Generate SPRD TWRP device tree
 
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
     inputs:
       image_url:
@@ -54,7 +52,14 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install ./twrpdtgen-sprd
 
       - name: Download stock image
-        run: curl --fail --location --retry 3 --retry-all-errors --output stock.img '${{ inputs.image_url }}' && test -s stock.img && file stock.img
+        env:
+          IMAGE_URL: ${{ inputs.image_url }}
+        run: |
+          test -n "$IMAGE_URL" || { echo 'image_url is required'; exit 1; }
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output stock.img "$IMAGE_URL"
+          test -s stock.img
+          file stock.img
 
       - name: Generate device tree
         env:

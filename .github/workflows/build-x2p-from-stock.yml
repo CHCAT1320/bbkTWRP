@@ -88,8 +88,13 @@ jobs:
         run: |
           mkdir -p "twrp/$(dirname '${{ steps.tree.outputs.path }}')"
           mv generated/EEBBK/X2P "twrp/${{ steps.tree.outputs.path }}"
-          test -f "twrp/${{ steps.tree.outputs.path }}/AndroidProducts.mk"
-          test -f "twrp/${{ steps.tree.outputs.path }}/twrp_X2P.mk"
+          tree="twrp/${{ steps.tree.outputs.path }}"
+          test -f "$tree/AndroidProducts.mk"
+          test -f "$tree/twrp_X2P.mk"
+          if ! grep -q '^TARGET_COPY_OUT_PRODUCT[[:space:]]*:?=' "$tree/BoardConfig.mk"; then
+            printf '\n# TWRP 12.1 expects the product output directory.\nTARGET_COPY_OUT_PRODUCT := product\n' >> "$tree/BoardConfig.mk"
+          fi
+          grep -n '^TARGET_COPY_OUT_PRODUCT' "$tree/BoardConfig.mk"
 
       - name: Apply SPRD source overlay and dependencies
         working-directory: twrp

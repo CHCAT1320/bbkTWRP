@@ -1,6 +1,8 @@
 name: Build SPRD TWRP
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
     inputs:
       device_tree_url:
@@ -142,7 +144,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: twrp-${{ inputs.device_name }}-${{ github.run_number }}
-          name: TWRP ${{ inputs.device_name }} #${{ github.run_number }}
+          name: "TWRP ${{ inputs.device_name }} #${{ github.run_number }}"
           files: release/*
           body: |
             Device: ${{ inputs.device_name }}

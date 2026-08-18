@@ -1,6 +1,8 @@
 name: Build X2P TWRP from stock recovery
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -124,7 +126,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: twrp-X2P-${{ github.run_number }}
-          name: TWRP X2P #${{ github.run_number }}
+          name: "TWRP X2P #${{ github.run_number }}"
           files: release/*
           body: |
             Device: EEBBK X2P

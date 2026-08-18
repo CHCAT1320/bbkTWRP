@@ -1,6 +1,8 @@
 name: Generate SPRD TWRP device tree
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
     inputs:
       image_url:
@@ -71,7 +73,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: dt-${{ github.run_number }}
-          name: TWRP device tree ${{ inputs.codename }} #${{ github.run_number }}
+          name: "TWRP device tree ${{ inputs.codename }} #${{ github.run_number }}"
           files: DeviceTree-${{ inputs.codename }}-${{ github.run_number }}.zip
           body: |
             Device: ${{ inputs.manufacturer }} ${{ inputs.codename }}

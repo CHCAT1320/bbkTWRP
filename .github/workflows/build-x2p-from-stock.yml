@@ -49,7 +49,8 @@ jobs:
         id: tree
         run: |
           path=$(dirname "$(find generated -type f -name BoardConfig.mk -print -quit)")
-          printf 'path=%s\n' "${path#generated/}" >> "$GITHUB_OUTPUT"
+          tree_path="device/${path#generated/}"
+          printf 'path=%s\n' "$tree_path" >> "$GITHUB_OUTPUT"
           grep -E '^(PRODUCT_DEVICE|TW_THEME|TARGET_BOARD_PLATFORM)' "$path/BoardConfig.mk" || true
           grep -R 'PRODUCT_DEVICE' "$path" --include='AndroidProducts.mk' --include='*.mk' || true
 
@@ -87,6 +88,8 @@ jobs:
         run: |
           mkdir -p "twrp/$(dirname '${{ steps.tree.outputs.path }}')"
           mv generated/EEBBK/X2P "twrp/${{ steps.tree.outputs.path }}"
+          test -f "twrp/${{ steps.tree.outputs.path }}/AndroidProducts.mk"
+          test -f "twrp/${{ steps.tree.outputs.path }}/twrp_X2P.mk"
 
       - name: Apply SPRD source overlay and dependencies
         working-directory: twrp
@@ -112,6 +115,7 @@ jobs:
         run: |
           source build/envsetup.sh
           export ALLOW_MISSING_DEPENDENCIES=true
+          grep -n 'twrp_X2P' device/EEBBK/X2P/AndroidProducts.mk
           lunch twrp_X2P-eng
           make recoveryimage -j"$(nproc --all)"
 

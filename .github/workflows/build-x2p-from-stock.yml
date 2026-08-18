@@ -97,8 +97,12 @@ jobs:
           if ! grep -q '^TARGET_COPY_OUT_SYSTEM_EXT[[:space:]]*:?=' "$tree/BoardConfig.mk"; then
             printf 'TARGET_COPY_OUT_SYSTEM_EXT := system_ext\n' >> "$tree/BoardConfig.mk"
           fi
+          if ! grep -q '^TARGET_COPY_OUT_VENDOR_DLKM[[:space:]]*:?=' "$tree/BoardConfig.mk"; then
+            printf 'TARGET_COPY_OUT_VENDOR_DLKM := vendor_dlkm\n' >> "$tree/BoardConfig.mk"
+          fi
           grep -n '^TARGET_COPY_OUT_PRODUCT' "$tree/BoardConfig.mk"
           grep -n '^TARGET_COPY_OUT_SYSTEM_EXT' "$tree/BoardConfig.mk"
+          grep -n '^TARGET_COPY_OUT_VENDOR_DLKM' "$tree/BoardConfig.mk"
 
       - name: Apply SPRD source overlay and dependencies
         working-directory: twrp

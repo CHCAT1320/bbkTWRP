@@ -33,9 +33,24 @@ jobs:
       - name: Install generator dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cpio lz4 file zip
+          sudo apt-get install -y cpio lz4 file unzip zip
           python -m pip install --upgrade pip
           python -m pip install ./twrpdtgen-sprd
+
+      - name: Extract kernel from Magisk patched boot
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/topjohnwu/Magisk/releases/download/v30.7/Magisk-v30.7.apk \
+            --output "$RUNNER_TEMP/Magisk-v30.7.apk"
+          unzip -p "$RUNNER_TEMP/Magisk-v30.7.apk" lib/x86_64/libmagiskboot.so \
+            > "$RUNNER_TEMP/magiskboot"
+          chmod +x "$RUNNER_TEMP/magiskboot"
+          mkdir "$RUNNER_TEMP/boot-unpacked"
+          cp stock/magisk_patched-30700_Afo5k.img "$RUNNER_TEMP/boot.img"
+          cd "$RUNNER_TEMP/boot-unpacked"
+          "$RUNNER_TEMP/magiskboot" unpack "$RUNNER_TEMP/boot.img"
+          test -s kernel
+          file kernel
 
       - name: Generate X2P device tree
         run: |
@@ -89,6 +104,8 @@ jobs:
           tree="twrp/${{ steps.tree.outputs.path }}"
           test -f "$tree/AndroidProducts.mk"
           test -f "$tree/twrp_X2P.mk"
+          cp "$RUNNER_TEMP/boot-unpacked/kernel" "$tree/prebuilt/kernel"
+          test -s "$tree/prebuilt/kernel"
           if ! grep -q '^BUILD_BROKEN_DUP_RULES[[:space:]]*:?=' "$tree/BoardConfig.mk"; then
             printf '\n# The stock recovery tree and TWRP both provide ODM policy metadata.\nBUILD_BROKEN_DUP_RULES := true\n' >> "$tree/BoardConfig.mk"
           fi

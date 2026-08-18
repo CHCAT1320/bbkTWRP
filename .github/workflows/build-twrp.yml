@@ -1,8 +1,6 @@
 name: Build SPRD TWRP
 
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
     inputs:
       device_tree_url:
@@ -78,7 +76,13 @@ jobs:
           echo "$RUNNER_TEMP/repo-bin" >> "$GITHUB_PATH"
 
       - name: Inspect device tree
-        run: git clone --depth=1 --branch '${{ inputs.device_tree_branch }}' '${{ inputs.device_tree_url }}' "$RUNNER_TEMP/device-tree"
+        env:
+          DEVICE_TREE_URL: ${{ inputs.device_tree_url }}
+          DEVICE_TREE_BRANCH: ${{ inputs.device_tree_branch }}
+        run: |
+          test -n "$DEVICE_TREE_URL" || { echo 'device_tree_url is required'; exit 1; }
+          test -n "$DEVICE_TREE_BRANCH" || { echo 'device_tree_branch is required'; exit 1; }
+          git clone --depth=1 --branch "$DEVICE_TREE_BRANCH" "$DEVICE_TREE_URL" "$RUNNER_TEMP/device-tree"
 
       - name: Initialize TWRP source
         run: |

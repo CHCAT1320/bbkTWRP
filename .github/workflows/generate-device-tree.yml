@@ -1,0 +1,81 @@
+name: Generate SPRD TWRP device tree
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_url:
+        description: Direct URL to vendor_boot.img, boot.img, or recovery.img
+        required: true
+        type: string
+      manufacturer:
+        description: Optional manufacturer override
+        required: false
+        default: EEBBK
+        type: string
+      codename:
+        description: Device codename override
+        required: false
+        default: X2P
+        type: string
+      twrpdtgen_ref:
+        description: twrpdtgen-sprd branch, tag, or commit
+        required: true
+        default: master
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check out SPRD generator
+        uses: actions/checkout@v4
+        with:
+          repository: weikaizhi4/twrpdtgen-sprd
+          ref: ${{ inputs.twrpdtgen_ref }}
+          path: twrpdtgen-sprd
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install image tools
+        run: sudo apt-get update && sudo apt-get install -y cpio lz4 file zip
+
+      - name: Install generator
+        run: python -m pip install --upgrade pip && python -m pip install ./twrpdtgen-sprd
+
+      - name: Download stock image
+        run: curl --fail --location --retry 3 --retry-all-errors --output stock.img '${{ inputs.image_url }}' && test -s stock.img && file stock.img
+
+      - name: Generate device tree
+        env:
+          MANUFACTURER: ${{ inputs.manufacturer }}
+          CODENAME: ${{ inputs.codename }}
+        run: |
+          mkdir -p device_tree_output
+          python -m twrpdtgen stock.img -o device_tree_output \
+            --manufacturer "$MANUFACTURER" --codename "$CODENAME"
+          test -n "$(find device_tree_output -type f -name BoardConfig.mk -print -quit)"
+
+      - name: Package device tree
+        run: zip -r "DeviceTree-${{ inputs.codename }}-${{ github.run_number }}.zip" device_tree_output
+
+      - name: Publish device tree
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dt-${{ github.run_number }}
+          name: TWRP device tree ${{ inputs.codename }} #${{ github.run_number }}
+          files: DeviceTree-${{ inputs.codename }}-${{ github.run_number }}.zip
+          body: |
+            Device: ${{ inputs.manufacturer }} ${{ inputs.codename }}
+            Source image: ${{ inputs.image_url }}
+            Generator: weikaizhi4/twrpdtgen-sprd@${{ inputs.twrpdtgen_ref }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

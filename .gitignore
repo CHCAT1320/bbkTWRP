@@ -1,0 +1,5 @@
+AdbExecutable/
+stock/vendor_boot.img
+stock/*.img.downloading
+generated/
+twrpdtgen-sprd/

@@ -1,0 +1,135 @@
+name: Build X2P TWRP from stock recovery
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check stock image
+        run: |
+          test -s stock/recovery.img
+          file stock/recovery.img
+
+      - name: Check out SPRD device-tree generator
+        uses: actions/checkout@v4
+        with:
+          repository: weikaizhi4/twrpdtgen-sprd
+          ref: master
+          path: twrpdtgen-sprd
+
+      - name: Set up Python and image tools
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install generator dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cpio lz4 file zip
+          python -m pip install --upgrade pip
+          python -m pip install ./twrpdtgen-sprd
+
+      - name: Generate X2P device tree
+        run: |
+          python -m twrpdtgen stock/recovery.img -o generated \
+            --manufacturer EEBBK --codename X2P
+          test -n "$(find generated -type f -name BoardConfig.mk -print -quit)"
+
+      - name: Resolve generated device path
+        id: tree
+        run: |
+          path=$(dirname "$(find generated -type f -name BoardConfig.mk -print -quit)")
+          printf 'path=%s\n' "${path#generated/}" >> "$GITHUB_OUTPUT"
+          grep -E '^(PRODUCT_DEVICE|TW_THEME|TARGET_BOARD_PLATFORM)' "$path/BoardConfig.mk" || true
+          grep -R 'PRODUCT_DEVICE' "$path" --include='AndroidProducts.mk' --include='*.mk' || true
+
+      - name: Prepare Android build environment
+        run: |
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib \
+            gcc-multilib git git-lfs gnupg gperf imagemagick lib32ncurses-dev \
+            lib32readline-dev lib32z1-dev libc6-dev-i386 libgl1-mesa-dev liblz4-tool \
+            libncurses-dev libssl-dev libxml2 libxml2-utils lzop pngcrush python3 \
+            python-is-python3 rsync schedtool squashfs-tools unzip xsltproc zip zlib1g-dev
+
+      - name: Set up Java and repo
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '11'
+
+      - name: Install repo tool
+        run: |
+          curl --fail --location --retry 3 https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "$RUNNER_TEMP/repo"
+          chmod +x "$RUNNER_TEMP/repo"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Initialize TWRP 12.1 source
+        run: |
+          mkdir twrp
+          cd twrp
+          repo init --depth=1 \
+            -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git \
+            -b twrp-12.1
+          repo sync -c -j"$(nproc --all)" --force-sync --no-clone-bundle --no-tags
+
+      - name: Install generated device tree
+        run: |
+          mkdir -p "twrp/$(dirname '${{ steps.tree.outputs.path }}')"
+          mv generated/EEBBK/X2P "twrp/${{ steps.tree.outputs.path }}"
+
+      - name: Apply SPRD source overlay and dependencies
+        working-directory: twrp
+        run: |
+          tree='${{ steps.tree.outputs.path }}'
+          if [ -f "$tree/prebuilt/sourcecode/patch.sh" ]; then
+            TWRP_SOURCE="$PWD" sh "$tree/prebuilt/sourcecode/patch.sh"
+            TWRP_SOURCE="$PWD" sh "$tree/prebuilt/sourcecode/patch.sh" --check
+          fi
+          shopt -s nullglob
+          for file in "$tree"/*.dependencies; do
+            bash "$GITHUB_WORKSPACE/scripts/convert.sh" "$file"
+            repo sync -c -j"$(nproc --all)" --force-sync --no-clone-bundle --no-tags
+          done
+
+      - name: Set swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: Build recovery image
+        working-directory: twrp
+        run: |
+          source build/envsetup.sh
+          export ALLOW_MISSING_DEPENDENCIES=true
+          lunch twrp_X2P-eng
+          make recoveryimage -j"$(nproc --all)"
+
+      - name: Collect and publish recovery
+        run: |
+          product=twrp/out/target/product/X2P
+          mkdir -p release
+          cp "$product/recovery.img" release/recovery-X2P.img
+          sha256sum release/recovery-X2P.img > release/SHA256SUMS
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: twrp-X2P-${{ github.run_number }}
+          name: TWRP X2P #${{ github.run_number }}
+          files: release/*
+          body: |
+            Device: EEBBK X2P
+            Platform: Unisoc UMS512 / ums512_1h190
+            Source: A2_X2_X2P_super_recovery_v1.1.0 recovery.img
+            Android profile: TWRP 12.1 / recoveryimage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

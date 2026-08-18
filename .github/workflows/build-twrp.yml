@@ -1,0 +1,153 @@
+name: Build SPRD TWRP
+
+on:
+  workflow_dispatch:
+    inputs:
+      device_tree_url:
+        description: Git repository containing the generated device tree
+        required: true
+        type: string
+      device_tree_branch:
+        description: Device tree branch or tag
+        required: true
+        default: main
+        type: string
+      device_path:
+        description: Device tree path, for example device/eebbk/x2p
+        required: true
+        type: string
+      device_name:
+        description: PRODUCT_DEVICE and output directory name
+        required: true
+        default: X2P
+        type: string
+      lunch_target:
+        description: Full lunch target, for example twrp_X2P-eng
+        required: true
+        default: twrp_X2P-eng
+        type: string
+      manifest_url:
+        description: TWRP manifest repository
+        required: true
+        default: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git
+        type: string
+      manifest_branch:
+        description: TWRP source branch
+        required: true
+        default: twrp-12.1
+        type: string
+      build_target:
+        description: Use recoveryimage for this Android 11 recovery tree
+        required: true
+        default: recoveryimage
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib \
+            gcc-multilib git git-lfs gnupg gperf imagemagick lib32ncurses-dev \
+            lib32readline-dev lib32z1-dev libc6-dev-i386 libgl1-mesa-dev liblz4-tool \
+            libncurses-dev libssl-dev libxml2 libxml2-utils lz4 lzop pngcrush \
+            python3 python-is-python3 rsync schedtool squashfs-tools unzip xsltproc zip zlib1g-dev
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '11'
+
+      - name: Set up repo
+        run: |
+          mkdir -p "$RUNNER_TEMP/repo-bin"
+          curl --fail --location --retry 3 https://storage.googleapis.com/git-repo-downloads/repo \
+            --output "$RUNNER_TEMP/repo-bin/repo"
+          chmod +x "$RUNNER_TEMP/repo-bin/repo"
+          echo "$RUNNER_TEMP/repo-bin" >> "$GITHUB_PATH"
+
+      - name: Inspect device tree
+        run: git clone --depth=1 --branch '${{ inputs.device_tree_branch }}' '${{ inputs.device_tree_url }}' "$RUNNER_TEMP/device-tree"
+
+      - name: Initialize TWRP source
+        run: |
+          mkdir twrp
+          cd twrp
+          repo init --depth=1 -u '${{ inputs.manifest_url }}' -b '${{ inputs.manifest_branch }}'
+          repo sync -c -j"$(nproc --all)" --force-sync --no-clone-bundle --no-tags
+
+      - name: Install device tree
+        run: |
+          case '${{ inputs.device_path }}' in
+            device/*) ;;
+            *) echo 'device_path must be under device/' >&2; exit 1 ;;
+          esac
+          case '/${{ inputs.device_path }}/' in
+            */../*) echo 'device_path cannot contain ..' >&2; exit 1 ;;
+          esac
+          mkdir -p "twrp/$(dirname '${{ inputs.device_path }}')"
+          mv "$RUNNER_TEMP/device-tree" "twrp/${{ inputs.device_path }}"
+
+      - name: Sync device dependencies
+        working-directory: twrp
+        run: |
+          shopt -s nullglob
+          for file in '${{ inputs.device_path }}'/*.dependencies; do
+            bash "$GITHUB_WORKSPACE/scripts/convert.sh" "$file"
+          done
+          if compgen -G '${{ inputs.device_path }}/*.dependencies' > /dev/null; then
+            repo sync -c -j"$(nproc --all)" --force-sync --no-clone-bundle --no-tags
+          fi
+
+      - name: Apply SPRD source overlay
+        working-directory: twrp
+        run: |
+          patch='${{ inputs.device_path }}/prebuilt/sourcecode/patch.sh'
+          if [ -f "$patch" ]; then
+            TWRP_SOURCE="$PWD" sh "$patch"
+            TWRP_SOURCE="$PWD" sh "$patch" --check
+          fi
+
+      - name: Set swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: Build recovery
+        working-directory: twrp
+        run: |
+          source build/envsetup.sh
+          export ALLOW_MISSING_DEPENDENCIES=true
+          lunch '${{ inputs.lunch_target }}'
+          make '${{ inputs.build_target }}' -j"$(nproc --all)"
+
+      - name: Collect artifacts
+        run: |
+          product_dir="twrp/out/target/product/${{ inputs.device_name }}"
+          mkdir -p release
+          find "$product_dir" -maxdepth 1 -type f \( -name '*.img' -o -name '*.zip' \) -exec cp '{}' release/ \;
+          test -n "$(find release -type f -print -quit)"
+          sha256sum release/* > release/SHA256SUMS
+
+      - name: Publish build
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: twrp-${{ inputs.device_name }}-${{ github.run_number }}
+          name: TWRP ${{ inputs.device_name }} #${{ github.run_number }}
+          files: release/*
+          body: |
+            Device: ${{ inputs.device_name }}
+            Lunch target: ${{ inputs.lunch_target }}
+            Build target: ${{ inputs.build_target }}
+            Manifest: ${{ inputs.manifest_branch }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
